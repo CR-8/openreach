@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: openreach-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: openreach
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: openreach-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  minio:
+    image: minio/minio
+    container_name: openreach-minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: openreach-litellm
+    restart: always
+    ports:
+      - "4001:4000"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+
+  wppconnect-server:
+    image: wppconnect/server:latest
+    container_name: openreach-wppconnect
+    restart: always
+    ports:
+      - "21465:21465"
+    environment:
+      PORT: 21465
+      SECRET_KEY: THISISMYSECURETOKEN
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: openreach-api
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/openreach?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "super-secret-openreach-jwt-token-key-change-in-prod"
+      JWT_REFRESH_SECRET: "super-secret-openreach-refresh-token-key-change-in-prod"
+      WPPCONNECT_URL: "http://wppconnect-server:21465"
+      WPPCONNECT_SECRET_KEY: "THISISMYSECURETOKEN"
+      LITELLM_URL: "http://litellm:4000/v1"
+    depends_on:
+      - postgres
+      - redis
+      - wppconnect-server
+      - litellm
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: openreach-worker
+    command: ["npm", "run", "worker"]
+    restart: always
+    environment:
+      DATABASE_URL: "postgresql://postgres:postgres@postgres:5432/openreach?schema=public"
+      REDIS_URL: "redis://redis:6379"
+    depends_on:
+      - postgres
+      - redis
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    container_name: openreach-web
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: "http://localhost:4000"
+      NEXT_PUBLIC_SOCKET_URL: "http://localhost:4000"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

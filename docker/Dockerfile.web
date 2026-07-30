@@ -1,0 +1,15 @@
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@10.18.2 --activate
+
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* turbo.json ./
+COPY packages ./packages
+COPY apps/web ./apps/web
+
+RUN pnpm install --frozen-lockfile || pnpm install
+RUN pnpm --filter @openreach/web build
+
+EXPOSE 3000
+CMD ["pnpm", "--filter", "@openreach/web", "start"]
